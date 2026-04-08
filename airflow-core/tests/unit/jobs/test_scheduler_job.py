@@ -4993,7 +4993,6 @@ class TestSchedulerJob:
         assert adrq_2 is not None
 
     @pytest.mark.need_serialized_dag
-    @pytest.mark.backend("postgres", "mysql")
     def test_create_dag_runs_when_concurrent_asset_events_created(self, session: Session, dag_maker, caplog):
         import random
         from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -5020,13 +5019,18 @@ class TestSchedulerJob:
                 asset_event = AssetEvent(asset_id=asset_id, timestamp=now)
                 session.add(asset_event)
                 session.commit()
-                time.sleep(sleep)  # sleep to simulate slow perforamcne
+                time.sleep(sleep)  # sleep to simulate slow performance
                 asset_manager = AssetManager()
-                if inspect(session.get_bind()).dialect.name == "postgresql":
-                    asset_manager._queue_dagruns_nonpartitioned_postgres(
-                        asset_id=asset_id, dags_to_queue=[dag_model], event=asset_event, session=session
+                dialect_name = inspect(session.get_bind()).dialect.name
+                if dialect_name in ("postgresql", "sqlite"):
+                    asset_manager._queue_dagruns_nonpartitioned_conflict_update(
+                        asset_id=asset_id,
+                        dags_to_queue=[dag_model],
+                        event=asset_event,
+                        session=session,
+                        dialect_name=dialect_name,
                     )
-                elif inspect(session.get_bind()).dialect.name == "mysql":
+                elif dialect_name == "mysql":
                     asset_manager._queue_dagruns_nonpartitioned_mysql(
                         asset_id=asset_id, dags_to_queue=[dag_model], event=asset_event, session=session
                     )
@@ -5234,7 +5238,7 @@ class TestSchedulerJob:
                 AssetDagRunQueue.asset_id == asset_id, AssetDagRunQueue.target_dag_id == dag_model.dag_id
             )
         ).one_or_none()
-        assert _adrq is None
+        assert _adrq is not None
 
     @time_machine.travel(DEFAULT_DATE + datetime.timedelta(days=1, seconds=9), tick=False)
     @mock.patch("airflow.jobs.scheduler_job_runner.Stats.timing")
